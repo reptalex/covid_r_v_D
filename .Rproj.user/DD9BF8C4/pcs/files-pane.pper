@@ -1,0 +1,9 @@
+{
+    "path" : "~/COVID/covid_r_v_D/scripts",
+    "sortOrder" : [
+        {
+            "ascending" : true,
+            "columnIndex" : 2
+        }
+    ]
+}
