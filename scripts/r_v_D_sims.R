@@ -146,9 +146,9 @@ y <- NULL
 r <- 0.2585 ## New York value obtained above
 r=0.3
 for (a in intervention_efficacies){
-  y <- rbind(y,seird(r,intervention_efficacy = a,cfr=1e-3
+  y <- rbind(y,seird(r,intervention_efficacy = a,cfr=1e-3,
                      intervention_deaths = intervention_deaths,days=400,
-                     S0=S0))
+                     S0=S0,gamma=1/4))
 }
 
 
