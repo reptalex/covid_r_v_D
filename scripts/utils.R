@@ -267,10 +267,10 @@ seird_solve <- function(t,state,parameters){
       Dlag=0
     }
     dS=lambda-(as.numeric(Dlag<=D_intervention)*beta_pre+
-                 as.numeric(Dlag>D_intervention & D<=D_relaxation)*(beta_intervention)+
+                 as.numeric(Dlag>D_intervention & Dlag<=D_relaxation)*(beta_intervention)+
                  as.numeric(Dlag>D_relaxation)*beta_relaxation)*S*I-m*S
     dE=(as.numeric(Dlag<=D_intervention)*beta_pre+
-          as.numeric(Dlag>D_intervention & D<=D_relaxation)*(beta_intervention)+
+          as.numeric(Dlag>D_intervention & Dlag<=D_relaxation)*(beta_intervention)+
           as.numeric(Dlag>D_relaxation)*beta_relaxation)*S*I-a*E-m*E
     dI=a*E-m_inf*I-gamma*I
     dR=gamma*I-m*R
