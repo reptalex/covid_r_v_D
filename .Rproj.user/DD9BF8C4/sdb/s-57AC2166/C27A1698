@@ -1,0 +1,21 @@
+{
+    "collab_server" : "",
+    "contents" : "source('scripts/utils.R')\n\nset.seed(2)\nxx <- seq(as.Date('2020-01-21'),as.Date('2020-08-25'),by='day')\nn=length(xx)\n\n### mean with day of week effect\ndays <- weekdays(xx)\neffects <- data.table('day'=days[1:7],'effect'=seq(-1,1,length.out = 7))\nmn <- seq(1,10,length.out=n)+effects[match(days,day),effect]-5*as.numeric(xx>as.Date('2020-06-01'))\nmn <- mn*10 ## scale-up to few zero counts\n\n\nyy <- rnbinom(n,100,mu=mn)\ndd <- data.table('date'=xx,'yy'=yy)\n\n##requires nbss() as I coded in utils\n# zz <- nbss(yy)\n# zz$date <- x\n# ggplot(zz,aes(date,exp(mean_position)))+\n#   geom_line(lwd=2)+\n#   geom_point(data=dd,aes(date,yy))\n\n# ssm ---------------------------------------------------------------------\n\n\nmodel_nb <- SSModel(yy ~ SSMtrend(2, Q=list(0, NA),\n                                 P1=diag(c(10, 1)),\n                                 a1=c(0, 0),\n                                 state_names=c(\"level\", \"trend\"))+\n                      SSMseasonal(7),\n                    u=rep(exp(2), length(yy)), distribution=\"negative binomial\")\nfit <- fitSSM(model_nb, c(0), method=\"L-BFGS-B\", control=list(maxit=200))\nsm_signal <- KFS(fit$model, filtering=\"state\",smoothing='none')\n\n\n# plots -------------------------------------------------------------------\n\n\npar(mfrow=c(2,1))\nplot(xx,yy,xlab='date',ylab='N(t)')\nplot(xx,exp(sm_signal$a[-1,'level']),ylab='trend',xlab='date')\nabline(v=as.Date('2020-06-01'))\n\n\n# rolling poisson ---------------------------------------------------------\nwindow_size=21\ngetGrowthRate <- function(n,new_confirmed,date,day_of_week,z_score=FALSE){\n  dd <- data.table('new_confirmed'=new_confirmed,\n                   'date'=date,\n                   'day_of_week'=day_of_week)\n  \n  fit <- glm(new_confirmed~date+day_of_week,family=poisson,data=dd[n])\n  # fit <- mgcv::gam(new_confirmed~date+day_of_week,family='nb',data=dd[n])\n  if (z_score){\n    if (!'gam' %in% class(fit)){\n      \n      summary(fit)$coefficients['date','z value'] %>%\n        return\n    } else {\n      summary(fit)$p.t['date'] %>% return\n    }\n  } else {\n    return(coef(fit)['date'])\n  }\n}\n\ndf[,day_of_week:=weekdays(ds)]\ndf[,n:=1:.N]\ndf[,growth_rate:=rollapply(n,width=window_size,FUN=getGrowthRate,fill=NA,\n                           new_confirmed=y,date=ds,\n                           day_of_week=day_of_week,align='right')]\n\npar(mfrow=c(2,1))\nplot(df$ds,df$y)\nplot(df$ds,df$growth_rate,type='l')\nabline(v=as.Date('2020-06-01'))\n\n",
+    "created" : 1598553469859.000,
+    "dirty" : false,
+    "encoding" : "UTF-8",
+    "folds" : "",
+    "hash" : "3657190455",
+    "id" : "C27A1698",
+    "lastKnownWriteTime" : 1598560480,
+    "last_content_update" : 1598560480987,
+    "path" : "~/COVID/ssm_filtering_future_peaks.R",
+    "project_path" : null,
+    "properties" : {
+        "tempName" : "Untitled1"
+    },
+    "relative_order" : 5,
+    "source_on_save" : false,
+    "source_window" : "",
+    "type" : "r_source"
+}

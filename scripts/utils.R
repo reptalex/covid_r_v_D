@@ -11,33 +11,22 @@ library(lubridate)
 library(EpiEstim)
 
 
-# Requires to get sockets parallization to work on os x. 
-library(rstudioapi)
-if (Sys.getenv("RSTUDIO") == "1" && !nzchar(Sys.getenv("RSTUDIO_TERM")) && 
-    Sys.info()["sysname"] == "Darwin" && getRversion() >= "4.0.0") {
-  if(versionInfo()$version < "1.3.1056"){
-    parallel:::setDefaultClusterOptions(setup_strategy = "sequential")
-  }  
-}
-
-get_cori <- function(df.in, 
-                     icol_name, 
+get_cori <- function(df.in,
+                     icol_name,
                      out_name = 'Cori',
-                     window = 1, 
-                     SI_mean=parlist$true_mean_SI, 
-                     SI_var=2*(parlist$true_mean_SI/2)^2,
+                     window = 1,
+                     SI_mean=4,
+                     SI_var=4.75^2,
                      wend = TRUE){
   
-  df.in[icol_name] <- na_to_0(df.in[icol_name]) ## Replace NAs in incidence
-  
+  nas <- which(is.na(getElement(df.in,icol_name)))
+  df.in[nas,(icol_name):=0]
   
   idat <- df.in %>%
     #filter(get(icol_name) > 0 & !is.na(get(icol_name))) %>%
     complete(time = 2:max(df.in$time)) %>%
     mutate_all(.funs = function(xx){ifelse(is.na(xx), 0, xx)}) %>%
     arrange(time)
-  
-  
   
   ts <- idat$time
   ts <- ts[ts > 1 & ts <= (max(ts)-window+1)]
@@ -57,7 +46,7 @@ get_cori <- function(df.in,
         min_std_si = sqrt(SI_var)*.8,
         max_std_si = sqrt(SI_var)*1.2,
         n1 = 50,
-        n2 = 100, 
+        n2 = 100,
         t_start=ts,
         t_end=te
       )
@@ -67,8 +56,79 @@ get_cori <- function(df.in,
   outs$R %>%
     mutate(time = if(wend == TRUE) t_end else ceiling((t_end+t_start)/2) ) %>%
     select(time, `Mean(R)`, `Quantile.0.025(R)`, `Quantile.0.975(R)`) %>%
-    setNames(c('time', paste0(out_name, '.mean'), paste0(out_name, '.025'), paste0(out_name, '.975')))
+    setNames(c('time', paste0(out_name, '.mean'), paste0(out_name, '.025'), paste0(out_name, '.975'))) %>%
+    return()
 }
+
+# Requires to get sockets parallization to work on os x. 
+library(rstudioapi)
+if (Sys.getenv("RSTUDIO") == "1" && !nzchar(Sys.getenv("RSTUDIO_TERM")) && 
+    Sys.info()["sysname"] == "Darwin" && getRversion() >= "4.0.0") {
+  if(versionInfo()$version < "1.3.1056"){
+    parallel:::setDefaultClusterOptions(setup_strategy = "sequential")
+  }  
+}
+
+
+nbss <- function(x,remove_outliers=TRUE,filtering=TRUE){
+  nb_model <- function(x, pars){
+    model_nb <- SSModel(x ~ SSMtrend(2, Q=list(0, NA),
+                                     P1=diag(c(10, 1)),
+                                     a1=c(0, 0),
+                                     state_names=c("level", "trend"))+
+                          SSMseasonal(7),
+                        u=rep(exp(pars[1]), length(x)), distribution="negative binomial")
+    fit <- fitSSM(model_nb, c(0), method="L-BFGS-B", control=list(maxit=200))
+    return(fit)
+  }
+  logLik_nb <- function(x, pars){
+    fit <- nb_model(x, pars)
+    ll <- logLik(fit$model, marginal = TRUE)
+    return(-ll)
+  }
+  if (remove_outliers==TRUE){
+    x <- outlier_detection(x)
+  }
+  res <- optim(c(-1), function(y) logLik_nb(x, y), method="Brent", lower=-2, upper=2)   
+  fit <- nb_model(x, res$par)
+  if (filtering==TRUE){
+    sm_signal <- KFS(fit$model, filtering="signal")
+    sm_state <- KFS(fit$model, filtering="state")
+    
+    out <- data.frame(p2.5_position = c(qnorm(0.025, sm_state$alphahat[,1], (sqrt(sm_state$V[1,1,])))), 
+                      p97.5_position = c(qnorm(0.975, sm_state$alphahat[,1],(sqrt(sm_state$V[1,1,])))), 
+                      mean_position = (c(sm_state$alphahat[,1])),
+                      p2.5_growth_rate = c(qnorm(0.025, sm_state$alphahat[,2], (sqrt(sm_state$V[2,2,])))), 
+                      p97.5_growth_rate = c(qnorm(0.975, sm_state$alphahat[,2], (sqrt(sm_state$V[2,2,])))),
+                      p25_growth_rate = c(qnorm(0.25, sm_state$alphahat[,2], (sqrt(sm_state$V[2,2,])))), 
+                      p75_growth_rate = c(qnorm(0.75, sm_state$alphahat[,2], (sqrt(sm_state$V[2,2,])))), 
+                      growth_rate = (c(sm_state$alphahat[,2])),
+                      percentile_0_growth_rate =c(pnorm(0, sm_state$alphahat[,2], (sqrt(sm_state$V[2,2,])))),
+                      growth_rate = (c(sm_state$alphahat[,2])),
+                      dispersion=res$par[1], 
+                      z_score_growth_rate = c(sm_state$alphahat[,2]/sqrt(sm_state$V[2,2,])))
+  } else {
+    sm_signal <- KFS(fit$model, smoothing="signal")
+    sm_state <- KFS(fit$model, smoothing="state")
+    out <- data.frame(p2.5_signal = exp(qnorm(0.025, sm_signal$thetahat, sqrt(c(sm_signal$V_theta)))), 
+                      p97.5_signal = exp(qnorm(0.975, sm_signal$thetahat, sqrt(c(sm_signal$V_theta)))), 
+                      mean_signal = exp(sm_signal$thetahat), 
+                      p2.5_position = c(qnorm(0.025, sm_state$alphahat[,1], (sqrt(sm_state$V[1,1,])))), 
+                      p97.5_position = c(qnorm(0.975, sm_state$alphahat[,1],(sqrt(sm_state$V[1,1,])))), 
+                      mean_position = (c(sm_state$alphahat[,1])),
+                      p2.5_growth_rate = c(qnorm(0.025, sm_state$alphahat[,2], (sqrt(sm_state$V[2,2,])))), 
+                      p97.5_growth_rate = c(qnorm(0.975, sm_state$alphahat[,2], (sqrt(sm_state$V[2,2,])))),
+                      p25_growth_rate = c(qnorm(0.25, sm_state$alphahat[,2], (sqrt(sm_state$V[2,2,])))), 
+                      p75_growth_rate = c(qnorm(0.75, sm_state$alphahat[,2], (sqrt(sm_state$V[2,2,])))), 
+                      growth_rate = (c(sm_state$alphahat[,2])),
+                      percentile_0_growth_rate =c(pnorm(0, sm_state$alphahat[,2], (sqrt(sm_state$V[2,2,])))),
+                      growth_rate = (c(sm_state$alphahat[,2])),
+                      dispersion=res$par[1], 
+                      z_score_growth_rate = c(sm_state$alphahat[,2]/sqrt(sm_state$V[2,2,])))
+  }
+  return(out)
+}
+
 # Main Model function -- CALL THIS 
 # dat should be a data.frame for a single region to be modeled 
 #    with column "new_confirmed" which is count data
@@ -84,7 +144,7 @@ get_cori <- function(df.in,
 #   pX_Y is quantile X for the quantitly Y
 #   mean_ is the mean of the quantity Y
 #   z_score_growth_rate = growth_rate/sd_growth_rate
-fit_nbss <- function(dat, series="new_confirmed", precomputed_dispersions=NULL, return_fit=FALSE,maxiter=200){
+fit_covid_ssm <- function(dat, series="new_confirmed", precomputed_dispersions=NULL, return_fit=FALSE,maxiter=200){
   
   # Helper functions
   nb_model <- function(dat, pars){
@@ -114,7 +174,8 @@ fit_nbss <- function(dat, series="new_confirmed", precomputed_dispersions=NULL, 
   dat <- custom_processors(dat)
   if (sum(dat[,series]!=0) < 10) return(NULL)
   tryCatch({
-    dat <- outlier_detection(dat, series)    
+    outlier_filtered_ts <- getElement(dat,series) %>% outlier_detection
+    dat <- transmute(dat, series=outlier_filtered_ts)    
   },  error = function(err){
     return(NULL)
   })
@@ -176,9 +237,7 @@ fit_nbss <- function(dat, series="new_confirmed", precomputed_dispersions=NULL, 
   if (quantile(abs(out$z_score_growth_rate), probs=0.75) < 0.4) return(NULL)
   return(cbind(dat, out))
 }
-
-
-nbss <- function(dat,series="new_confirmed", level='all',mc.cores=1, precomputed_dispersions=NULL){
+covid19_nbss <- function(dat,series="new_confirmed", level='all',mc.cores=1, precomputed_dispersions=NULL){
   if (level=="country"){
     tmp <- filter(dat, administrative_area_level==1)
   } else if (level=="state"){
@@ -233,16 +292,16 @@ custom_processors <- function(dat){
   return(dat)
 }
 
-outlier_detection <- function(dat, series="new_confirmed"){
-  
+
+outlier_detection <- function(x){
   tryCatch({
-    res <- tso(ts(dat[,series]), 
+    res <- tso(ts(x),
                type="TC", delta=0.1, maxit.iloop = 100, maxit.oloop = 10, 
                #tsmethod = "auto.arima", args.tsmethod = list(allowdrift = FALSE, ic = "bic", stationary=TRUE),
                tsmethod="arima", args.tsmethod=list(order=c(1,1,2), method="ML", transform.pars=TRUE),
                cval=4)
   }, error = function(err){
-    res <- tso(ts(dat[,series]), 
+    res <- tso(ts(x),
                type="TC", delta=0.1, maxit.iloop = 100, maxit.oloop = 10, 
                #tsmethod = "auto.arima", args.tsmethod = list(allowdrift = FALSE, ic = "bic", stationary=TRUE),
                tsmethod="arima", args.tsmethod=list(order=c(1,1,2), method="ML", transform.pars=FALSE),
@@ -250,12 +309,8 @@ outlier_detection <- function(dat, series="new_confirmed"){
   })
   res <- res$outliers %>% 
     filter(tstat > 10)
-  var <- rlang::enquo(series)
-  dat <- mutate(dat, series_nod = !!var)
-  if (nrow(res)!=0){
-    dat[res$ind,series] <- NA
-  }
-  return(dat)
+  x[res$ind] <- NA
+  return(x)
 }
 
 PoissonFit <- function(n,new_confirmed,date,half_life=NULL,day_of_week,z_score=FALSE){
@@ -373,7 +428,7 @@ seird <- function(r,cfr=0.004,S0=3.27e8,start_date=as.Date('2020-01-15'),days=20
   out[,new_confirmed:=rpois(.N,const*case_detection*I)]
   out[,n:=1:.N]
   if (gr_estimation=='nbss'){
-    out <- nbss(out,level='SEIR')
+    out <- cbind(out,nbss(out$new_confirmed))
     out[,growth_rate:=shift(growth_rate,lag_onset_to_death)]
   } else {
     out[,growth_rate:=rollapply(n,width=window_size,FUN=PoissonFit,fill=NA,
