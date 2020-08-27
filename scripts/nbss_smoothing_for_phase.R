@@ -42,30 +42,54 @@ world <- bind_rows(world, states, counties)
 world <- world %>% 
   group_by(id) %>% 
   pad() %>% 
-  mutate(new_confirmed = confirmed - lag(confirmed)) %>% 
+  mutate(new_confirmed = confirmed - lag(confirmed), 
+         new_deaths = deaths - lag(deaths)) %>% 
   ungroup() %>% 
   filter(new_confirmed >= 0) %>% 
   filter(date < Sys.Date()-days(1)) %>% # exclude last day as seems to have  reporting lag 
-  dplyr::select(date, id, deaths, confirmed, new_confirmed, population, contains("administrative")) %>% 
+  dplyr::select(date, id, deaths, new_deaths, confirmed, new_confirmed, population, contains("administrative")) %>% 
   filter(!is.na(date))
+
+
+
+# sandbox -----------------------------------------------------------------
+
+random_ids_to_keep <- world %>%
+  group_by(id) %>%
+  summarise(id = unique(id), administrative_area_level = unique(administrative_area_level)) %>%
+  ungroup() %>%
+  group_by(administrative_area_level) %>%
+  slice(5) %>%
+  pull(id)
+
+world <- world %>%
+  filter(id %in% random_ids_to_keep)
 
 # NBSS growth rate estimation -----------------------------------------------------------
 
 ## IF DISPERSIONS NEED TO BE CALCULATED
 if (compute_dispersions){
-  fits <- nbss(world, mc.cores=7)
+  fits <- nbss(world, series="new_confirmed", mc.cores=7)
+  fits <- nbss(fits, series="new_deaths", mc.cores=7)
   save(fits, file="fits.RData")
   fits %>%
     group_by(id) %>%
     summarise(dispersion=unique(dispersion)) %>%
     write_csv("data/precomputed_dispersion.csv")
+  fits %>%
+    group_by(id) %>%
+    summarise(dispersion=unique(dispersion_deaths)) %>%
+    write_csv("data/precomputed_dispersion_deaths.csv")
 }
 ## IF PRECOMPUTED DISPERSIONS ARE PRESENT 
 # Load pre-computed nb dispersion parameters
 dispersions <- read.csv("data/precomputed_dispersion.csv")
+dispersions_deaths <- read.csv("data/precomputed_dispersion_deaths.csv")
 
 # run in parallel with pre-computed dispersions
-fits <- nbss(world, mc.cores=1, precomputed_dispersions = dispersions)
+fits <- nbss(world, mc.cores=7, precomputed_dispersions = dispersions)
+fits <- nbss(fits, mc.cores=7, precomputed_dispersions = dispersions_deaths)
+
 
 save(fits, file="data/fits.RData")
 # load("fits.RData")

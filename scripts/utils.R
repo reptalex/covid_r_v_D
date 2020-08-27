@@ -10,6 +10,16 @@ library(progress)
 library(lubridate)
 library(EpiEstim)
 
+
+# Requires to get sockets parallization to work on os x. 
+library(rstudioapi)
+if (Sys.getenv("RSTUDIO") == "1" && !nzchar(Sys.getenv("RSTUDIO_TERM")) && 
+    Sys.info()["sysname"] == "Darwin" && getRversion() >= "4.0.0") {
+  if(versionInfo()$version < "1.3.1056"){
+    parallel:::setDefaultClusterOptions(setup_strategy = "sequential")
+  }  
+}
+
 get_cori <- function(df.in, 
                      icol_name, 
                      out_name = 'Cori',
@@ -74,11 +84,11 @@ get_cori <- function(df.in,
 #   pX_Y is quantile X for the quantitly Y
 #   mean_ is the mean of the quantity Y
 #   z_score_growth_rate = growth_rate/sd_growth_rate
-fit_nbss <- function(dat, precomputed_dispersions=NULL, return_fit=FALSE,maxiter=200){
+fit_nbss <- function(dat, series="new_confirmed", precomputed_dispersions=NULL, return_fit=FALSE,maxiter=200){
   
   # Helper functions
   nb_model <- function(dat, pars){
-    model_nb <- SSModel(dat$new_confirmed ~ SSMtrend(2, Q=list(0, NA),
+    model_nb <- SSModel(dat[,series] ~ SSMtrend(2, Q=list(0, NA),
                                                      P1=diag(c(10, 1)),
                                                      a1=c(0, 0),
                                                      state_names=c("level", "trend"))+
@@ -95,21 +105,21 @@ fit_nbss <- function(dat, precomputed_dispersions=NULL, return_fit=FALSE,maxiter
   
   # Remove preceding zeros
   dat <- dat %>% 
-    arrange(date) %>% 
-    mutate(cs = cumsum(new_confirmed)) %>% 
-    filter(cs > 0)
+    arrange(date)
+  dat$cs = cumsum(dat[,series]) 
+  dat <- dat %>% filter(cs > 0)
   if (nrow(dat) < 10) return(NULL)
   
   # outlier detection for early outbreak
   dat <- custom_processors(dat)
-  if (sum(dat$new_confirmed!=0) < 10) return(NULL)
+  if (sum(dat[,series]!=0) < 10) return(NULL)
   tryCatch({
-    dat <- outlier_detection(dat)    
+    dat <- outlier_detection(dat, series)    
   },  error = function(err){
     return(NULL)
   })
   
-  if (length(dat$new_confirmed[!is.na(dat$new_confirmed)]) < 10) return(NULL)
+  if (length(dat[,series][!is.na(dat[,series])]) < 10) return(NULL)
   
   
   if (!is.null(precomputed_dispersions)){
@@ -128,20 +138,37 @@ fit_nbss <- function(dat, precomputed_dispersions=NULL, return_fit=FALSE,maxiter
   sm_signal <- KFS(fit$model, smoothing="signal")
   sm_state <- KFS(fit$model, smoothing="state")
   
-  out <- data.frame(p2.5_signal = exp(qnorm(0.025, sm_signal$thetahat, sqrt(c(sm_signal$V_theta)))), 
-                    p97.5_signal = exp(qnorm(0.975, sm_signal$thetahat, sqrt(c(sm_signal$V_theta)))), 
-                    mean_signal = exp(sm_signal$thetahat), 
-                    p2.5_position = c(qnorm(0.025, sm_state$alphahat[,1], (sqrt(sm_state$V[1,1,])))), 
-                    p97.5_position = c(qnorm(0.975, sm_state$alphahat[,1],(sqrt(sm_state$V[1,1,])))), 
-                    mean_position = (c(sm_state$alphahat[,1])),
-                    p2.5_growth_rate = c(qnorm(0.025, sm_state$alphahat[,2], (sqrt(sm_state$V[2,2,])))), 
-                    p97.5_growth_rate = c(qnorm(0.975, sm_state$alphahat[,2], (sqrt(sm_state$V[2,2,])))),
-                    p25_growth_rate = c(qnorm(0.25, sm_state$alphahat[,2], (sqrt(sm_state$V[2,2,])))), 
-                    p75_growth_rate = c(qnorm(0.75, sm_state$alphahat[,2], (sqrt(sm_state$V[2,2,])))), 
-                    growth_rate = (c(sm_state$alphahat[,2])),
-                    percentile_0_growth_rate =c(pnorm(0, sm_state$alphahat[,2], (sqrt(sm_state$V[2,2,])))),
-                    dispersion=res$par[1], 
-                    z_score_growth_rate = c(sm_state$alphahat[,2]/sqrt(sm_state$V[2,2,])))
+  if (series=="new_confirmed"){
+    out <- data.frame(p2.5_signal = exp(qnorm(0.025, sm_signal$thetahat, sqrt(c(sm_signal$V_theta)))), 
+                      p97.5_signal = exp(qnorm(0.975, sm_signal$thetahat, sqrt(c(sm_signal$V_theta)))), 
+                      mean_signal = exp(sm_signal$thetahat), 
+                      p2.5_position = c(qnorm(0.025, sm_state$alphahat[,1], (sqrt(sm_state$V[1,1,])))), 
+                      p97.5_position = c(qnorm(0.975, sm_state$alphahat[,1],(sqrt(sm_state$V[1,1,])))), 
+                      mean_position = (c(sm_state$alphahat[,1])),
+                      p2.5_growth_rate = c(qnorm(0.025, sm_state$alphahat[,2], (sqrt(sm_state$V[2,2,])))), 
+                      p97.5_growth_rate = c(qnorm(0.975, sm_state$alphahat[,2], (sqrt(sm_state$V[2,2,])))),
+                      p25_growth_rate = c(qnorm(0.25, sm_state$alphahat[,2], (sqrt(sm_state$V[2,2,])))), 
+                      p75_growth_rate = c(qnorm(0.75, sm_state$alphahat[,2], (sqrt(sm_state$V[2,2,])))), 
+                      growth_rate = (c(sm_state$alphahat[,2])),
+                      percentile_0_growth_rate =c(pnorm(0, sm_state$alphahat[,2], (sqrt(sm_state$V[2,2,])))),
+                      dispersion=res$par[1], 
+                      z_score_growth_rate = c(sm_state$alphahat[,2]/sqrt(sm_state$V[2,2,])))
+  } else if (series == "new_deaths"){
+    out <- data.frame(p2.5_signal_deaths = exp(qnorm(0.025, sm_signal$thetahat, sqrt(c(sm_signal$V_theta)))), 
+                      p97.5_signal_deaths = exp(qnorm(0.975, sm_signal$thetahat, sqrt(c(sm_signal$V_theta)))), 
+                      mean_signal_deaths = exp(sm_signal$thetahat), 
+                      p2.5_position_deaths = c(qnorm(0.025, sm_state$alphahat[,1], (sqrt(sm_state$V[1,1,])))), 
+                      p97.5_position_deaths = c(qnorm(0.975, sm_state$alphahat[,1],(sqrt(sm_state$V[1,1,])))), 
+                      mean_position_deaths = (c(sm_state$alphahat[,1])),
+                      p2.5_growth_rate_deaths = c(qnorm(0.025, sm_state$alphahat[,2], (sqrt(sm_state$V[2,2,])))), 
+                      p97.5_growth_rate_deaths = c(qnorm(0.975, sm_state$alphahat[,2], (sqrt(sm_state$V[2,2,])))),
+                      p25_growth_rate_deaths = c(qnorm(0.25, sm_state$alphahat[,2], (sqrt(sm_state$V[2,2,])))), 
+                      p75_growth_rate_deaths = c(qnorm(0.75, sm_state$alphahat[,2], (sqrt(sm_state$V[2,2,])))), 
+                      growth_rate_deaths = (c(sm_state$alphahat[,2])),
+                      percentile_0_growth_rate_deaths =c(pnorm(0, sm_state$alphahat[,2], (sqrt(sm_state$V[2,2,])))),
+                      dispersion_deaths=res$par[1], 
+                      z_score_growth_rate_deaths = c(sm_state$alphahat[,2]/sqrt(sm_state$V[2,2,])))
+  }
   
   if (any(grepl('administrative_area',colnames(dat)))){
     if (any(out$p97.5_signal > 1e6)) return(NULL)
@@ -151,43 +178,41 @@ fit_nbss <- function(dat, precomputed_dispersions=NULL, return_fit=FALSE,maxiter
 }
 
 
-nbss <- function(dat,level='all',mc.cores=1, precomputed_dispersions=NULL){
-  
-  if (level=='SEIR'){
-     fits <- fit_nbss(dat,precomputed_dispersions)
+nbss <- function(dat,series="new_confirmed", level='all',mc.cores=1, precomputed_dispersions=NULL){
+  if (level=="country"){
+    tmp <- filter(dat, administrative_area_level==1)
+  } else if (level=="state"){
+    tmp <- filter(dat, administrative_area_level==2)
+  } else if (level=="all") {
+    tmp <- dat
   } else {
-    if (level=="country"){
-      tmp <- filter(dat, administrative_area_level==1)
-    } else if (level=="state"){
-      tmp <- filter(dat, administrative_area_level==2)
-    } else if (level=="all") {
-      tmp <- dat
-    } else {
-      stop("only level variables that are supported are all, country, and state")
-    }
-    tmp <- dat %>% 
-      as.data.frame() %>% 
-      split(.$id)
-    if (mc.cores == 1){
-      fits <- list()
-      pb <- progress_bar$new(total = length(tmp), format=" [:bar] :percent eta: :eta")
-      for (i in 1:length(tmp)){
-        pb$tick()
-        fits[[i]] <- fit_nbss(tmp[[i]], precomputed_dispersions)
-      }  
-    } else {
-      
-      # cl <- parallel::makeCluster(mc.cores)
-      # parallel::clusterExport(cl,'custom_processors')
-      # parallel::clusterEvalQ(cl,{library(KFAS)
-      #                            library(data.table)
-      #   library(tsoutliers)
-      #   library(tidyverse)
-      #   })
-      fits <- mclapply(tmp, function(x) fit_nbss(x, precomputed_dispersions), mc.cores=mc.cores)
-    }
-    fits <- bind_rows(fits)
+    stop("only level variables that are supported are all, country, and state")
   }
+  tmp <- dat %>% 
+    as.data.frame() %>% 
+    split(.$id)
+  if (mc.cores == 1){
+    fits <- list()
+    pb <- progress_bar$new(total = length(tmp), format=" [:bar] :percent eta: :eta")
+    for (i in 1:length(tmp)){
+      pb$tick()
+      fits[[i]] <- fit_nbss(tmp[[i]], series, precomputed_dispersions)
+    }  
+  } else {
+    cl <- parallel::makeCluster(mc.cores)
+    parallel::clusterEvalQ(cl, {
+      library(tidyverse)
+      library(lubridate)
+      library(KFAS)
+      library(tsoutliers)
+      library(data.table)
+    })
+    parallel::clusterExport(cl,c("custom_processors", "outlier_detection", "fit_nbss"))
+    fits <- parLapply(cl, tmp,  function(x) fit_nbss(x, series, precomputed_dispersions))
+    stopCluster(cl)
+    rm('cl')
+  }
+  fits <- bind_rows(fits)
   return(fits)
 }
 
@@ -208,16 +233,16 @@ custom_processors <- function(dat){
   return(dat)
 }
 
-outlier_detection <- function(dat){
+outlier_detection <- function(dat, series="new_confirmed"){
   
   tryCatch({
-    res <- tso(ts(dat$new_confirmed), 
+    res <- tso(ts(dat[,series]), 
                type="TC", delta=0.1, maxit.iloop = 100, maxit.oloop = 10, 
                #tsmethod = "auto.arima", args.tsmethod = list(allowdrift = FALSE, ic = "bic", stationary=TRUE),
                tsmethod="arima", args.tsmethod=list(order=c(1,1,2), method="ML", transform.pars=TRUE),
                cval=4)
   }, error = function(err){
-    res <- tso(ts(dat$new_confirmed), 
+    res <- tso(ts(dat[,series]), 
                type="TC", delta=0.1, maxit.iloop = 100, maxit.oloop = 10, 
                #tsmethod = "auto.arima", args.tsmethod = list(allowdrift = FALSE, ic = "bic", stationary=TRUE),
                tsmethod="arima", args.tsmethod=list(order=c(1,1,2), method="ML", transform.pars=FALSE),
@@ -225,9 +250,10 @@ outlier_detection <- function(dat){
   })
   res <- res$outliers %>% 
     filter(tstat > 10)
-  dat <- mutate(dat, new_confirmed_nod = new_confirmed)
+  var <- rlang::enquo(series)
+  dat <- mutate(dat, series_nod = !!var)
   if (nrow(res)!=0){
-    dat[res$ind,"new_confirmed"] <- NA
+    dat[res$ind,series] <- NA
   }
   return(dat)
 }
