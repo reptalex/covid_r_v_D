@@ -52,19 +52,6 @@ world <- world %>%
 
 
 
-# sandbox -----------------------------------------------------------------
-
-random_ids_to_keep <- world %>%
-  group_by(id) %>%
-  summarise(id = unique(id), administrative_area_level = unique(administrative_area_level)) %>%
-  ungroup() %>%
-  group_by(administrative_area_level) %>%
-  slice(5) %>%
-  pull(id)
-
-world <- world %>%
-  filter(id %in% random_ids_to_keep)
-
 # NBSS growth rate estimation -----------------------------------------------------------
 
 ## IF DISPERSIONS NEED TO BE CALCULATED
