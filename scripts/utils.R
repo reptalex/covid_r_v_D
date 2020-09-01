@@ -11,42 +11,48 @@ library(lubridate)
 library(EpiEstim)
 
 
-get_cori <- function(df.in,
-                     icol_name,
+get_cori <- function(df.in, 
+                     icol_name, 
                      out_name = 'Cori',
-                     window = 1,
-                     SI_mean=4,
-                     SI_var=4.75^2,
+                     window = 1, 
+                     GI_mean=4, 
+                     GI_var=4.75^2,
                      wend = TRUE){
   
-  nas <- which(is.na(getElement(df.in,icol_name)))
-  df.in[nas,(icol_name):=0]
+  max.obs.time <- df.in %>% filter(!is.na(!!sym(icol_name))) %>% pull(time) %>% tail(1)
+  
   
   idat <- df.in %>%
     #filter(get(icol_name) > 0 & !is.na(get(icol_name))) %>%
-    complete(time = 2:max(df.in$time)) %>%
-    mutate_all(.funs = function(xx){ifelse(is.na(xx), 0, xx)}) %>%
-    arrange(time)
+    complete(time = 2:max.obs.time) %>%
+    arrange(time) %>%
+    filter(time <= max.obs.time)
+  
+  nas <- which(is.na(getElement(df.in,icol_name)))
+  df.in[nas,(icol_name):=0]
+  # idat[icol_name] <- na_to_0(idat[icol_name])
+  #mutate(cleaned = ifelse(is.na(!!sym(icol_name)) & time <= max.obs.time, 0, !!sym(icol_name)))
+  
   
   ts <- idat$time
   ts <- ts[ts > 1 & ts <= (max(ts)-window+1)]
   te <- ts+(window-1)
   
   estimate_R(
-    incid = pull(idat, eval(icol_name)),
+    incid = pull(idat, !!icol_name),
     method = "uncertain_si",
     config = make_config(
       list(
-        mean_si = SI_mean,
-        min_mean_si = SI_mean -1,
-        max_mean_si = SI_mean + 1,
+        mean_si = GI_mean,
+        min_mean_si = GI_mean -1,
+        max_mean_si = GI_mean + 1,
         std_mean_si = 1.5,
         std_std_si = 1.5,
-        std_si = sqrt(SI_var),
-        min_std_si = sqrt(SI_var)*.8,
-        max_std_si = sqrt(SI_var)*1.2,
+        std_si = sqrt(GI_var),
+        min_std_si = sqrt(GI_var)*.8,
+        max_std_si = sqrt(GI_var)*1.2,
         n1 = 50,
-        n2 = 100,
+        n2 = 100, 
         t_start=ts,
         t_end=te
       )
@@ -57,7 +63,9 @@ get_cori <- function(df.in,
     mutate(time = if(wend == TRUE) t_end else ceiling((t_end+t_start)/2) ) %>%
     select(time, `Mean(R)`, `Quantile.0.025(R)`, `Quantile.0.975(R)`) %>%
     setNames(c('time', paste0(out_name, '.mean'), paste0(out_name, '.025'), paste0(out_name, '.975'))) %>%
-    return()
+    as.data.table
+  
+  R[,Cori.smooth:=frollapply(Cori.mean,7,mean,align = 'right')]
 }
 
 # Requires to get sockets parallization to work on os x. 
@@ -70,7 +78,7 @@ if (Sys.getenv("RSTUDIO") == "1" && !nzchar(Sys.getenv("RSTUDIO_TERM")) &&
 }
 
 
-nbss <- function(x,remove_outliers=TRUE,filtering=TRUE){
+nbss <- function(x,remove_outliers=TRUE,filtering=FALSE){
   nb_model <- function(x, pars){
     model_nb <- SSModel(x ~ SSMtrend(2, Q=list(0, NA),
                                      P1=diag(c(10, 1)),
@@ -92,21 +100,21 @@ nbss <- function(x,remove_outliers=TRUE,filtering=TRUE){
   res <- optim(c(-1), function(y) logLik_nb(x, y), method="Brent", lower=-2, upper=2)   
   fit <- nb_model(x, res$par)
   if (filtering==TRUE){
-    sm_signal <- KFS(fit$model, filtering="signal")
-    sm_state <- KFS(fit$model, filtering="state")
+    sm_signal <- KFS(fit$model, filtering="signal",smoothing='none')
+    sm_state <- KFS(fit$model, filtering="state",smoothing='none')
     
-    out <- data.frame(p2.5_position = c(qnorm(0.025, sm_state$alphahat[,1], (sqrt(sm_state$V[1,1,])))), 
-                      p97.5_position = c(qnorm(0.975, sm_state$alphahat[,1],(sqrt(sm_state$V[1,1,])))), 
-                      mean_position = (c(sm_state$alphahat[,1])),
-                      p2.5_growth_rate = c(qnorm(0.025, sm_state$alphahat[,2], (sqrt(sm_state$V[2,2,])))), 
-                      p97.5_growth_rate = c(qnorm(0.975, sm_state$alphahat[,2], (sqrt(sm_state$V[2,2,])))),
-                      p25_growth_rate = c(qnorm(0.25, sm_state$alphahat[,2], (sqrt(sm_state$V[2,2,])))), 
-                      p75_growth_rate = c(qnorm(0.75, sm_state$alphahat[,2], (sqrt(sm_state$V[2,2,])))), 
-                      growth_rate = (c(sm_state$alphahat[,2])),
-                      percentile_0_growth_rate =c(pnorm(0, sm_state$alphahat[,2], (sqrt(sm_state$V[2,2,])))),
-                      growth_rate = (c(sm_state$alphahat[,2])),
+    out <- data.frame(p2.5_position = c(qnorm(0.025, sm_state$a[-1,'level'], (sqrt(sm_state$P[1,1,-1])))), 
+                      p97.5_position = c(qnorm(0.975, sm_state$a[-1,'level'],(sqrt(sm_state$P[1,1,-1])))), 
+                      mean_position = (c(sm_state$a[-1,'level'])),
+                      p2.5_growth_rate = c(qnorm(0.025, sm_state$a[-1,'trend'], (sqrt(sm_state$P[2,2,-1])))), 
+                      p97.5_growth_rate = c(qnorm(0.975, sm_state$a[-1,'trend'], (sqrt(sm_state$P[2,2,-1])))),
+                      p25_growth_rate = c(qnorm(0.25, sm_state$a[-1,'trend'], (sqrt(sm_state$P[2,2,-1])))), 
+                      p75_growth_rate = c(qnorm(0.75, sm_state$a[-1,'trend'], (sqrt(sm_state$P[2,2,-1])))), 
+                      growth_rate = (c(sm_state$a[-1,'trend'])),
+                      percentile_0_growth_rate =c(pnorm(0, sm_state$a[-1,'trend'], (sqrt(sm_state$P[2,2,-1])))),
+                      growth_rate = (c(sm_state$a[-1,'trend'])),
                       dispersion=res$par[1], 
-                      z_score_growth_rate = c(sm_state$alphahat[,2]/sqrt(sm_state$V[2,2,])))
+                      z_score_growth_rate = c(sm_state$a[-1,2]/sqrt(sm_state$P[2,2,-1])))
   } else {
     sm_signal <- KFS(fit$model, smoothing="signal")
     sm_state <- KFS(fit$model, smoothing="state")
@@ -144,7 +152,8 @@ nbss <- function(x,remove_outliers=TRUE,filtering=TRUE){
 #   pX_Y is quantile X for the quantitly Y
 #   mean_ is the mean of the quantity Y
 #   z_score_growth_rate = growth_rate/sd_growth_rate
-fit_covid_ssm <- function(dat, series="new_confirmed", precomputed_dispersions=NULL, return_fit=FALSE,maxiter=200){
+fit_covid_ssm <- function(dat, series="new_confirmed", precomputed_dispersions=NULL,
+                          return_fit=FALSE,maxiter=200,filtering=FALSE){
   
   # Helper functions
   nb_model <- function(dat, pars){
@@ -166,7 +175,7 @@ fit_covid_ssm <- function(dat, series="new_confirmed", precomputed_dispersions=N
   # Remove preceding zeros
   dat <- dat %>% 
     arrange(date)
-  dat$cs = cumsum(dat[,series]) 
+  dat$cs = cumsum(dat[,series])
   dat <- dat %>% filter(cs > 0)
   if (nrow(dat) < 10) return(NULL)
   
@@ -175,7 +184,7 @@ fit_covid_ssm <- function(dat, series="new_confirmed", precomputed_dispersions=N
   if (sum(dat[,series]!=0) < 10) return(NULL)
   tryCatch({
     outlier_filtered_ts <- getElement(dat,series) %>% outlier_detection
-    dat <- transmute(dat, series=outlier_filtered_ts)    
+    dat <- mutate(dat, series=outlier_filtered_ts)    
   },  error = function(err){
     return(NULL)
   })
@@ -196,39 +205,73 @@ fit_covid_ssm <- function(dat, series="new_confirmed", precomputed_dispersions=N
   fit <- nb_model(dat, res$par)
   if(return_fit) return(fit)
   if (fit$optim.out$convergence != 0) return(NULL)
-  sm_signal <- KFS(fit$model, smoothing="signal")
-  sm_state <- KFS(fit$model, smoothing="state")
-  
-  if (series=="new_confirmed"){
-    out <- data.frame(p2.5_signal = exp(qnorm(0.025, sm_signal$thetahat, sqrt(c(sm_signal$V_theta)))), 
-                      p97.5_signal = exp(qnorm(0.975, sm_signal$thetahat, sqrt(c(sm_signal$V_theta)))), 
-                      mean_signal = exp(sm_signal$thetahat), 
-                      p2.5_position = c(qnorm(0.025, sm_state$alphahat[,1], (sqrt(sm_state$V[1,1,])))), 
-                      p97.5_position = c(qnorm(0.975, sm_state$alphahat[,1],(sqrt(sm_state$V[1,1,])))), 
-                      mean_position = (c(sm_state$alphahat[,1])),
-                      p2.5_growth_rate = c(qnorm(0.025, sm_state$alphahat[,2], (sqrt(sm_state$V[2,2,])))), 
-                      p97.5_growth_rate = c(qnorm(0.975, sm_state$alphahat[,2], (sqrt(sm_state$V[2,2,])))),
-                      p25_growth_rate = c(qnorm(0.25, sm_state$alphahat[,2], (sqrt(sm_state$V[2,2,])))), 
-                      p75_growth_rate = c(qnorm(0.75, sm_state$alphahat[,2], (sqrt(sm_state$V[2,2,])))), 
-                      growth_rate = (c(sm_state$alphahat[,2])),
-                      percentile_0_growth_rate =c(pnorm(0, sm_state$alphahat[,2], (sqrt(sm_state$V[2,2,])))),
-                      dispersion=res$par[1], 
-                      z_score_growth_rate = c(sm_state$alphahat[,2]/sqrt(sm_state$V[2,2,])))
-  } else if (series == "new_deaths"){
-    out <- data.frame(p2.5_signal_deaths = exp(qnorm(0.025, sm_signal$thetahat, sqrt(c(sm_signal$V_theta)))), 
-                      p97.5_signal_deaths = exp(qnorm(0.975, sm_signal$thetahat, sqrt(c(sm_signal$V_theta)))), 
-                      mean_signal_deaths = exp(sm_signal$thetahat), 
-                      p2.5_position_deaths = c(qnorm(0.025, sm_state$alphahat[,1], (sqrt(sm_state$V[1,1,])))), 
-                      p97.5_position_deaths = c(qnorm(0.975, sm_state$alphahat[,1],(sqrt(sm_state$V[1,1,])))), 
-                      mean_position_deaths = (c(sm_state$alphahat[,1])),
-                      p2.5_growth_rate_deaths = c(qnorm(0.025, sm_state$alphahat[,2], (sqrt(sm_state$V[2,2,])))), 
-                      p97.5_growth_rate_deaths = c(qnorm(0.975, sm_state$alphahat[,2], (sqrt(sm_state$V[2,2,])))),
-                      p25_growth_rate_deaths = c(qnorm(0.25, sm_state$alphahat[,2], (sqrt(sm_state$V[2,2,])))), 
-                      p75_growth_rate_deaths = c(qnorm(0.75, sm_state$alphahat[,2], (sqrt(sm_state$V[2,2,])))), 
-                      growth_rate_deaths = (c(sm_state$alphahat[,2])),
-                      percentile_0_growth_rate_deaths =c(pnorm(0, sm_state$alphahat[,2], (sqrt(sm_state$V[2,2,])))),
-                      dispersion_deaths=res$par[1], 
-                      z_score_growth_rate_deaths = c(sm_state$alphahat[,2]/sqrt(sm_state$V[2,2,])))
+  if (filtering==FALSE){
+    sm_signal <- KFS(fit$model, smoothing="signal")
+    sm_state <- KFS(fit$model, smoothing="state")
+    
+    if (series=="new_confirmed"){
+      out <- data.frame(p2.5_signal = exp(qnorm(0.025, sm_signal$thetahat, sqrt(c(sm_signal$V_theta)))), 
+                        p97.5_signal = exp(qnorm(0.975, sm_signal$thetahat, sqrt(c(sm_signal$V_theta)))), 
+                        mean_signal = exp(sm_signal$thetahat), 
+                        p2.5_position = c(qnorm(0.025, sm_state$alphahat[,1], (sqrt(sm_state$V[1,1,])))), 
+                        p97.5_position = c(qnorm(0.975, sm_state$alphahat[,1],(sqrt(sm_state$V[1,1,])))), 
+                        mean_position = (c(sm_state$alphahat[,1])),
+                        p2.5_growth_rate = c(qnorm(0.025, sm_state$alphahat[,2], (sqrt(sm_state$V[2,2,])))), 
+                        p97.5_growth_rate = c(qnorm(0.975, sm_state$alphahat[,2], (sqrt(sm_state$V[2,2,])))),
+                        p25_growth_rate = c(qnorm(0.25, sm_state$alphahat[,2], (sqrt(sm_state$V[2,2,])))), 
+                        p75_growth_rate = c(qnorm(0.75, sm_state$alphahat[,2], (sqrt(sm_state$V[2,2,])))), 
+                        growth_rate = (c(sm_state$alphahat[,2])),
+                        percentile_0_growth_rate =c(pnorm(0, sm_state$alphahat[,2], (sqrt(sm_state$V[2,2,])))),
+                        dispersion=res$par[1], 
+                        z_score_growth_rate = c(sm_state$alphahat[,2]/sqrt(sm_state$V[2,2,])))
+    } else if (series == "new_deaths"){
+      out <- data.frame(p2.5_signal_deaths = exp(qnorm(0.025, sm_signal$thetahat, sqrt(c(sm_signal$V_theta)))), 
+                        p97.5_signal_deaths = exp(qnorm(0.975, sm_signal$thetahat, sqrt(c(sm_signal$V_theta)))), 
+                        mean_signal_deaths = exp(sm_signal$thetahat), 
+                        p2.5_position_deaths = c(qnorm(0.025, sm_state$alphahat[,1], (sqrt(sm_state$V[1,1,])))), 
+                        p97.5_position_deaths = c(qnorm(0.975, sm_state$alphahat[,1],(sqrt(sm_state$V[1,1,])))), 
+                        mean_position_deaths = (c(sm_state$alphahat[,1])),
+                        p2.5_growth_rate_deaths = c(qnorm(0.025, sm_state$alphahat[,2], (sqrt(sm_state$V[2,2,])))), 
+                        p97.5_growth_rate_deaths = c(qnorm(0.975, sm_state$alphahat[,2], (sqrt(sm_state$V[2,2,])))),
+                        p25_growth_rate_deaths = c(qnorm(0.25, sm_state$alphahat[,2], (sqrt(sm_state$V[2,2,])))), 
+                        p75_growth_rate_deaths = c(qnorm(0.75, sm_state$alphahat[,2], (sqrt(sm_state$V[2,2,])))), 
+                        growth_rate_deaths = (c(sm_state$alphahat[,2])),
+                        percentile_0_growth_rate_deaths =c(pnorm(0, sm_state$alphahat[,2], (sqrt(sm_state$V[2,2,])))),
+                        dispersion_deaths=res$par[1], 
+                        z_score_growth_rate_deaths = c(sm_state$alphahat[,2]/sqrt(sm_state$V[2,2,])))
+    }
+  } else {
+    if (series=="new_confirmed"){
+      sm_signal <- KFS(fit$model, filtering="signal",smoothing='none')
+      sm_state <- KFS(fit$model, filtering="state",smoothing='none')
+      
+      out <- data.frame(p2.5_position = c(qnorm(0.025, sm_state$a[-1,'level'], (sqrt(sm_state$P[1,1,-1])))), 
+                        p97.5_position = c(qnorm(0.975, sm_state$a[-1,'level'],(sqrt(sm_state$P[1,1,-1])))), 
+                        mean_position = (c(sm_state$a[-1,'level'])),
+                        p2.5_growth_rate = c(qnorm(0.025, sm_state$a[-1,'trend'], (sqrt(sm_state$P[2,2,-1])))), 
+                        p97.5_growth_rate = c(qnorm(0.975, sm_state$a[-1,'trend'], (sqrt(sm_state$P[2,2,-1])))),
+                        p25_growth_rate = c(qnorm(0.25, sm_state$a[-1,'trend'], (sqrt(sm_state$P[2,2,-1])))), 
+                        p75_growth_rate = c(qnorm(0.75, sm_state$a[-1,'trend'], (sqrt(sm_state$P[2,2,-1])))), 
+                        growth_rate = (c(sm_state$a[-1,'trend'])),
+                        percentile_0_growth_rate =c(pnorm(0, sm_state$a[-1,'trend'], (sqrt(sm_state$P[2,2,-1])))),
+                        growth_rate = (c(sm_state$a[-1,'trend'])),
+                        dispersion=res$par[1], 
+                        z_score_growth_rate = c(sm_state$a[-1,2]/sqrt(sm_state$P[2,2,-1])))
+    } else if (series == "new_deaths"){
+      
+      out <- data.frame(p2.5_position_deaths = c(qnorm(0.025, sm_state$a[-1,'level'], (sqrt(sm_state$P[1,1,-1])))), 
+                        p97.5_position_deaths = c(qnorm(0.975, sm_state$a[-1,'level'],(sqrt(sm_state$P[1,1,-1])))), 
+                        mean_position_deaths = (c(sm_state$a[-1,'level'])),
+                        p2.5_growth_rate_deaths = c(qnorm(0.025, sm_state$a[-1,'trend'], (sqrt(sm_state$P[2,2,-1])))), 
+                        p97.5_growth_rate_deaths = c(qnorm(0.975, sm_state$a[-1,'trend'], (sqrt(sm_state$P[2,2,-1])))),
+                        p25_growth_rate_deaths = c(qnorm(0.25, sm_state$a[-1,'trend'], (sqrt(sm_state$P[2,2,-1])))), 
+                        p75_growth_rate_deaths = c(qnorm(0.75, sm_state$a[-1,'trend'], (sqrt(sm_state$P[2,2,-1])))), 
+                        growth_rate_deaths = (c(sm_state$a[-1,'trend'])),
+                        percentile_0_growth_rate_deaths =c(pnorm(0, sm_state$a[-1,'trend'], (sqrt(sm_state$P[2,2,-1])))),
+                        growth_rate_deaths = (c(sm_state$a[-1,'trend'])),
+                        dispersion_deaths=res$par[1], 
+                        z_score_growth_rate_deaths = c(sm_state$a[-1,2]/sqrt(sm_state$P[2,2,-1])))
+    }
   }
   
   if (any(grepl('administrative_area',colnames(dat)))){
@@ -237,7 +280,8 @@ fit_covid_ssm <- function(dat, series="new_confirmed", precomputed_dispersions=N
   if (quantile(abs(out$z_score_growth_rate), probs=0.75) < 0.4) return(NULL)
   return(cbind(dat, out))
 }
-covid19_nbss <- function(dat,series="new_confirmed", level='all',mc.cores=1, precomputed_dispersions=NULL){
+covid19_nbss <- function(dat,series="new_confirmed", level='all',mc.cores=1, precomputed_dispersions=NULL,
+                         filtering=FALSE){
   if (level=="country"){
     tmp <- filter(dat, administrative_area_level==1)
   } else if (level=="state"){
@@ -255,7 +299,7 @@ covid19_nbss <- function(dat,series="new_confirmed", level='all',mc.cores=1, pre
     pb <- progress_bar$new(total = length(tmp), format=" [:bar] :percent eta: :eta")
     for (i in 1:length(tmp)){
       pb$tick()
-      fits[[i]] <- fit_nbss(tmp[[i]], series, precomputed_dispersions)
+      fits[[i]] <- fit_covid_ssm(tmp[[i]], series, precomputed_dispersions,filtering=filtering)
     }  
   } else {
     cl <- parallel::makeCluster(mc.cores)
@@ -266,8 +310,8 @@ covid19_nbss <- function(dat,series="new_confirmed", level='all',mc.cores=1, pre
       library(tsoutliers)
       library(data.table)
     })
-    parallel::clusterExport(cl,c("custom_processors", "outlier_detection", "fit_nbss"))
-    fits <- parLapply(cl, tmp,  function(x) fit_nbss(x, series, precomputed_dispersions))
+    parallel::clusterExport(cl,c("custom_processors", "outlier_detection", "fit_covid_ssm"))
+    fits <- parLapply(cl, tmp,  function(x) fit_covid_ssm(x, series, precomputed_dispersions,filtering=filtering))
     stopCluster(cl)
     rm('cl')
   }
@@ -279,16 +323,15 @@ covid19_nbss <- function(dat,series="new_confirmed", level='all',mc.cores=1, pre
 custom_processors <- function(dat){
   # Iowa and Indiana
   # if (unique(dat$administrative_area_level_2)%in%c("Iowa", "Indiana", "Kentucky")){
-  if (!"I" %in% colnames(dat)){
-    if (unique(dat$administrative_area_level_1)=="United States"){
-      if (!is.na(unique(dat$administrative_area_level_2))){
-        if (unique(dat$administrative_area_level_2 != "Washington")){
-          dat <- dat %>% 
-            filter(date > ymd("2020-02-28") )
-        }
+  
+  if (unique(dat$administrative_area_level_1)=="United States"){
+    if (!is.na(unique(dat$administrative_area_level_2))){
+      if (unique(dat$administrative_area_level_2 != "Washington")){
+        dat <- dat %>% 
+          filter(date > ymd("2020-02-28") )
       }
     }
-  } 
+  }
   return(dat)
 }
 
@@ -313,32 +356,32 @@ outlier_detection <- function(x){
   return(x)
 }
 
-PoissonFit <- function(n,new_confirmed,date,half_life=NULL,day_of_week,z_score=FALSE){
-  dd <- data.table('new_confirmed'=new_confirmed,
-                   'date'=date,
-                   'day_of_week'=day_of_week)
-  
-  dd <- dd[n]
-  if (!is.null(half_life)){
-    dd[,weight:=exp(as.numeric(date-min(date))*log(2)/half_life)]
-  } else {
-    dd[,weight:=1/.N]
-  }
-  
-  fit <- glm(new_confirmed~date+day_of_week,family=poisson,weights=weight,data=dd)
-  # fit <- mgcv::gam(new_confirmed~date+day_of_week,family='nb',data=dd[n])
-  if (z_score){
-    if (!'gam' %in% class(fit)){
-      
-      summary(fit)$coefficients['date','z value'] %>%
-        return
-    } else {
-      summary(fit)$p.t['date'] %>% return
-    }
-  } else {
-    return(coef(fit)['date'])
-  }
-}
+# PoissonFit <- function(n,new_confirmed,date,half_life=NULL,day_of_week,z_score=FALSE){
+#   dd <- data.table('new_confirmed'=new_confirmed,
+#                    'date'=date,
+#                    'day_of_week'=day_of_week)
+#   
+#   dd <- dd[n]
+#   if (!is.null(half_life)){
+#     dd[,weight:=exp(as.numeric(date-min(date))*log(2)/half_life)]
+#   } else {
+#     dd[,weight:=1/.N]
+#   }
+#   
+#   fit <- glm(new_confirmed~date+day_of_week,family=poisson,weights=weight,data=dd)
+#   # fit <- mgcv::gam(new_confirmed~date+day_of_week,family='nb',data=dd[n])
+#   if (z_score){
+#     if (!'gam' %in% class(fit)){
+#       
+#       summary(fit)$coefficients['date','z value'] %>%
+#         return
+#     } else {
+#       summary(fit)$p.t['date'] %>% return
+#     }
+#   } else {
+#     return(coef(fit)['date'])
+#   }
+# }
 
 seird_solve <- function(t,state,parameters){
   with(as.list(c(t,state,parameters)),{

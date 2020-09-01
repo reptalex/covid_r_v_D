@@ -5,12 +5,12 @@ library(lubridate)
 library(progress)
 library(RcppRoll)
 library(parallel)
-
+source("scripts/utils.R")
 
 set.seed(195893)
 
+compute_dispersions=TRUE
 
-source("scripts/utils.R")
 
 
 # load data ---------------------------------------------------------------
@@ -51,13 +51,13 @@ world <- world %>%
   filter(!is.na(date))
 
 
-
 # NBSS growth rate estimation -----------------------------------------------------------
 
 ## IF DISPERSIONS NEED TO BE CALCULATED
 if (compute_dispersions){
-  fits <- nbss(world, series="new_confirmed", mc.cores=7)
-  fits <- nbss(fits, series="new_deaths", mc.cores=7)
+  fits <- covid19_nbss(world, series="new_confirmed", mc.cores=1)
+  fits <- covid19_nbss(fits, series="new_deaths", mc.cores=1)
+
   save(fits, file="fits.RData")
   fits %>%
     group_by(id) %>%
@@ -67,20 +67,18 @@ if (compute_dispersions){
     group_by(id) %>%
     summarise(dispersion=unique(dispersion_deaths)) %>%
     write_csv("data/precomputed_dispersion_deaths.csv")
-}
+} else {
 ## IF PRECOMPUTED DISPERSIONS ARE PRESENT 
 # Load pre-computed nb dispersion parameters
-dispersions <- read.csv("data/precomputed_dispersion.csv")
-dispersions_deaths <- read.csv("data/precomputed_dispersion_deaths.csv")
-
-# run in parallel with pre-computed dispersions
-fits <- nbss(world, mc.cores=7, precomputed_dispersions = dispersions)
-fits <- nbss(fits, mc.cores=7, precomputed_dispersions = dispersions_deaths)
-
-
+  dispersions <- read.csv("data/precomputed_dispersion.csv")
+  dispersions_deaths <- read.csv("data/precomputed_dispersion_deaths.csv")
+  
+  # run in parallel with pre-computed dispersions
+  fits <- covid19_nbss(world, mc.cores=1, precomputed_dispersions = dispersions)
+  # fits <- covid19_nbss(fits,series='new_deaths', mc.cores=1, precomputed_dispersions = dispersions_deaths)
+}
 save(fits, file="data/fits.RData")
 # load("fits.RData")
-
 
 
 # Write important chunks into csv ---------------------------------------------
@@ -99,7 +97,7 @@ fits[country=='United States' & administrative_area_level==2] %>%
   write.csv('data/nbss_us_states.csv')
 
 fits[country=='Sweden' & administrative_area_level==2] %>%
-  write.csv('data/nbss_sweeden_states.csv')
+  write.csv('data/nbss_sweden_states.csv')
 
 fits[country=='United States' & administrative_area_level==3] %>%
-  write.csV('data/nbss_us_counties.csv')
+  write.csv('data/nbss_us_counties.csv')
