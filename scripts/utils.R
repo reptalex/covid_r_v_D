@@ -407,7 +407,7 @@ seird_solve <- function(t,state,parameters){
 seird <- function(r,cfr=0.004,S0=3.27e8,start_date=as.Date('2020-01-15'),days=200,
                   lag_onset_to_death=16,case_detection=0.01,window_size=21,half_life=NULL,
                   intervention_efficacy=0,relaxation=1,intervention_deaths=Inf,relaxation_deaths=Inf,
-                  gamma=1/9,a=1/3,gr_estimation='nbss',
+                  gamma=1/9,a=1/3,gr_estimation='nbss',growth_rate_deaths=FALSE,
                   day_of_week_effects=data.table('day_of_week'=c('Saturday','Sunday',
                                                                  'Monday','Tuesday',
                                                                  'Wednesday','Thursday','Friday'),
@@ -465,14 +465,18 @@ seird <- function(r,cfr=0.004,S0=3.27e8,start_date=as.Date('2020-01-15'),days=20
   
   out[is.na(D),D:=0]
   out[,new_deaths:=c(0,diff(D))]
-  
+  out[,sample_deaths:=rpois(.N,lambda = new_deaths*const)]
   out[,case_detection:=case_detection]
   
   out[,new_confirmed:=rpois(.N,const*case_detection*I)]
   out[,n:=1:.N]
   if (gr_estimation=='nbss'){
-    out <- cbind(out,nbss(out$new_confirmed))
-    out[,growth_rate:=shift(growth_rate,lag_onset_to_death)]
+    if (growth_rate_deaths){
+      out <- cbind(out,nbss(out$sample_deaths))
+    } else {
+      out <- cbind(out,nbss(out$new_confirmed))
+      out[,growth_rate:=shift(growth_rate,lag_onset_to_death)]
+    }
   } else {
     out[,growth_rate:=rollapply(n,width=window_size,FUN=PoissonFit,fill=NA,
                               new_confirmed=new_confirmed,date=date,half_life=half_life,
