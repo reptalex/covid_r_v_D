@@ -383,7 +383,7 @@ outlier_detection <- function(x){
 #   }
 # }
 
-seird_solve <- function(t,state,parameters){
+seird_solve_intervention_relaxation <- function(t,state,parameters){
   with(as.list(c(t,state,parameters)),{
     if (t>lag_onset_to_death){
       Dlag=lagvalue(t-lag_onset_to_death)[5]
@@ -439,7 +439,7 @@ seird <- function(r,cfr=0.004,S0=3.27e8,start_date=as.Date('2020-01-15'),days=20
                   'r'=r,
                   'lag_onset_to_death'=lag_onset_to_death)
   
-  out <- dede(y = state, times = times, func = seird_solve, parms = parameters) %>% as.data.table
+  out <- dede(y = state, times = times, func = seird_solve_intervention_relaxation, parms = parameters) %>% as.data.table
   out[,day:=ceiling(time)]
   
   out <- out[,list(S=S[.N],

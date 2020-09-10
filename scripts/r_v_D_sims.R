@@ -390,8 +390,8 @@ x[,Z:=E+I+R]
 x[,D_inst:=shift(D,19,type='lead')]
 
 
-ll=20
-ggplot(x,aes(shift(D,ll,type='lead'),Z,color=rt))+
+ll=19
+ggplot(x,aes(shift(D,ll,type='lead'),I+E,color=rt))+
   geom_line(lwd=5)+
   theme_bw()+
   scale_x_continuous('D(t+tau+1/a)',limits=c(1,4e4))+

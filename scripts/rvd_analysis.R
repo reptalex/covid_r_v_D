@@ -46,15 +46,17 @@ N=19e6
 a=1/3
 c <- a/(log(2)/3+gamma+mu)
 xx <- x$D
+r0 <- log(2)/2.6
 yy <- log(2)/2.6-beta*(1+gamma/mu)
-yy <- log(2)/2.6-.7*beta*(1+gamma/mu)*x$D
+yy <- log(2)/2.6-beta*(1+gamma/mu)*x$D-beta*c(0,diff(x$D))
+# yy <- r0-beta*(1+gamma/mu+)
 # yy <- log(2)/2.6-(beta^2*N)/mu*x$D
 
 
 plot(shift(x$D,19,type='lead'),x$rt,lwd=3,lty=2,
      xlab='D(t+tau+1/a)',ylab='r(t)',main='Approximate Linearity of r(D) for r>0')
-lines(shift(x$D,18,type='lead'),x$rt,lwd=3,lty=1)
-lines(shift(x$D,20,type='lead'),x$rt,lwd=3,lty=3)
+lines(shift(x$D,14,type='lead'),x$rt,lwd=3,lty=1)
+lines(shift(x$D,24,type='lead'),x$rt,lwd=3,lty=3)
 lines(xx,yy)
 abline(h=0)
 

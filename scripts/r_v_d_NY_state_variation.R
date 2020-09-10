@@ -14,10 +14,11 @@ AZ <- USA[state=='Arizona']
 FL <- USA[state=='Florida']
 MA <- USA[state=='Massachusetts']
 TX <- USA[state=='Texas']
-focal_counties <- c('New York City','Nassau','Dutchess','Saratoga','Montgomery')
+focal_counties <- c('New York City','Nassau','Dutchess','Saratoga','Tompkins')
 cnty_col <- rgb(.1,.5,1)
 grs <- NY[county %in% focal_counties & deaths_pc<1e-6,list('gr'=max(growth_rate,na.rm=T)),by=county]
 grs[county=='Saratoga',gr:=0.12]
+grs[county=='Tompkins',gr:=0.01]
 lbls <- data.table('county'=focal_counties,
                    'deaths_pc'=4e-6,
                    'growth_rate'=grs[match(focal_counties,county),gr])
