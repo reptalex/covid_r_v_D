@@ -2,8 +2,17 @@ library(data.table)
 library(magrittr)
 library(ggplot2)
 library(ggpubr)
-load('data/COVID_growth_rate_deaths_analysis_US_countries.Rd')
+rDlag <- 11
+
+# load('data/COVID_growth_rate_deaths_analysis_US_countries.Rd')
+X <- read.csv('data/nbss_countries.csv') %>% as.data.table
+USA <- read.csv('data/nbss_us_states.csv') %>% as.data.table
+USA[,date:=as.Date(date)]
+setkey(USA,state,date)
+USA[,deaths_pc:=shift(deaths_pc,rDlag,type='lead'),by=state]
 SWE <- X[country=='Sweden']
+SWE[,date:=as.Date(date)]
+SWE[,deaths_pc:=shift(deaths_pc,rDlag,type='lead')]
 
 AZ <- USA[state=='Arizona']
 NY <- USA[state=='New York']

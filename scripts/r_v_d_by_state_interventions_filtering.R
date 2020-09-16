@@ -91,6 +91,9 @@ SWE <- SWE[,!(grepl('signal',nms) | grepl('position',nms) | grepl('growth_rate',
 USA <- as.data.table(USA)
 SWE <- as.data.table(SWE)
 
+USA[,deaths_pc:=shift(deaths_pc,rDlag,type='lead'),by=state]
+SWE[,deaths_pc:=shift(deaths_pc,rDlag,type='lead'),by=state]
+
 AZ <- USA[state=='Arizona',]
 NY <- USA[state=='New York']
 FL <- USA[state=='Florida']

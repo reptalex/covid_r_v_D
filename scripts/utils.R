@@ -9,11 +9,12 @@ library(tsoutliers)
 library(progress)
 library(lubridate)
 library(EpiEstim)
+library(mgcv)
 
 
 get_cori <- function(df.in, 
                      icol_name, 
-                     out_name = 'Cori',
+                     out_name = 'Re_Cori',
                      window = 1, 
                      GI_mean=4, 
                      GI_var=4.75^2,
@@ -59,13 +60,14 @@ get_cori <- function(df.in,
     )
   ) -> outs
   
-  outs$R %>%
+  R <- outs$R %>%
     mutate(time = if(wend == TRUE) t_end else ceiling((t_end+t_start)/2) ) %>%
     select(time, `Mean(R)`, `Quantile.0.025(R)`, `Quantile.0.975(R)`) %>%
     setNames(c('time', paste0(out_name, '.mean'), paste0(out_name, '.025'), paste0(out_name, '.975'))) %>%
     as.data.table
   
-  R[,Cori.smooth:=frollapply(Cori.mean,7,mean,align = 'right')]
+  R[,Cori.smooth:=frollapply(Re_Cori.mean,7,mean,align = 'right')]
+  return(R)
 }
 
 # Requires to get sockets parallization to work on os x. 
@@ -356,7 +358,7 @@ outlier_detection <- function(x){
   return(x)
 }
 
-# PoissonFit <- function(n,new_confirmed,date,half_life=NULL,day_of_week,z_score=FALSE){
+# NbFit <- function(n,new_confirmed,date,half_life=NULL,day_of_week,z_score=FALSE){
 #   dd <- data.table('new_confirmed'=new_confirmed,
 #                    'date'=date,
 #                    'day_of_week'=day_of_week)
@@ -368,7 +370,7 @@ outlier_detection <- function(x){
 #     dd[,weight:=1/.N]
 #   }
 #   
-#   fit <- glm(new_confirmed~date+day_of_week,family=poisson,weights=weight,data=dd)
+#   fit <- glm(new_confirmed~date+day_of_week,family=nb,weights=weight,data=dd)
 #   # fit <- mgcv::gam(new_confirmed~date+day_of_week,family='nb',data=dd[n])
 #   if (z_score){
 #     if (!'gam' %in% class(fit)){
@@ -404,14 +406,16 @@ seird_solve_intervention_relaxation <- function(t,state,parameters){
   })
 }
 
-seird <- function(r,cfr=0.004,S0=3.27e8,start_date=as.Date('2020-01-15'),days=200,
-                  lag_onset_to_death=16,case_detection=0.01,window_size=21,half_life=NULL,
+seird <- function(r,cfr=0.006,S0=3.27e8,start_date=as.Date('2020-01-15'),days=200,
+                  lag_onset_to_case=7,
+                  lag_onset_to_death=18,window_size=21,half_life=NULL,
                   intervention_efficacy=0,relaxation=1,intervention_deaths=Inf,relaxation_deaths=Inf,
                   gamma=1/9,a=1/3,gr_estimation='nbss',growth_rate_deaths=FALSE,
                   day_of_week_effects=data.table('day_of_week'=c('Saturday','Sunday',
                                                                  'Monday','Tuesday',
                                                                  'Wednesday','Thursday','Friday'),
-                                                 'const'=c(0.6,0.4,1,1,1,1,.9))){
+                                                 'const'=c(0.6,0.4,1,1,1,1,.9)),
+                  case_detection=1e-4,nb_size=5){
   
   state <- c('S'=S0,'E'=0,'I'=1,'R'=0,'D'=0)
   times <- seq(0, days, by = 0.01)
@@ -466,25 +470,25 @@ seird <- function(r,cfr=0.004,S0=3.27e8,start_date=as.Date('2020-01-15'),days=20
   out[is.na(D),D:=0]
   out[,new_deaths:=c(0,diff(D))]
   out[,sample_deaths:=rpois(.N,lambda = new_deaths*const)]
-  out[,case_detection:=case_detection]
-  
-  out[,new_confirmed:=rpois(.N,const*case_detection*I)]
+  # out[,new_confirmed:=rpois(.N,const*case_detection*I)]
+  out[,new_confirmed:=shift(rnbinom(.N,mu=case_detection*I*const,
+                              size=nb_size),lag_onset_to_case)]
   out[,n:=1:.N]
   if (gr_estimation=='nbss'){
     if (growth_rate_deaths){
       out <- cbind(out,nbss(out$sample_deaths))
     } else {
       out <- cbind(out,nbss(out$new_confirmed))
-      out[,growth_rate:=shift(growth_rate,lag_onset_to_death)]
     }
   } else {
-    out[,growth_rate:=rollapply(n,width=window_size,FUN=PoissonFit,fill=NA,
+    out[,growth_rate:=rollapply(n,width=window_size,FUN=NbFit,fill=NA,
                               new_confirmed=new_confirmed,date=date,half_life=half_life,
                               day_of_week=day_of_week,align='right')]
   }
   out$n <- NULL
   out[,r:=r]
   out[,cfr:=cfr]
+  out[,lag_onset_to_case:=lag_onset_to_case]
   out[,lag_onset_to_death:=lag_onset_to_death]
   out[,intervention_efficacy:=intervention_efficacy]
   out[,intervention_deaths:=intervention_deaths]

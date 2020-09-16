@@ -10,79 +10,83 @@ library(EpiEstim)
 library(viridis)
 source('scripts/utils.R')
 
+rDlag <- 11 ## lag cases-->deaths + inc_period + inf_period
+R0_from_r <- function(r,gamma=1/9,ifr=0.006,a=1/3){
+  mu <- ifr*gamma/(1-ifr) ## mortality rate to have desired ifr
+  c=a/(r+gamma+mu)   # the ratio of E/I during exponential phase
+  betaN=(r+a)/(c)
+  # 
+  R0 <- a*betaN/(gamma+mu)/(a+mu)
+  return(R0)
+}
 
-
-
-
-
-
-
-# R_e ---------------------------------------------------------------------
-
-# 
-# x <- seird(log(2)/2.6)
-# 
-# # https://wwwnc.cdc.gov/eid/article/26/6/20-0357_article SI: mean SI = 3.96, sd=4.75
-# 
-# ### following Gostic et al.'s implementation of Cori et al.
-# out <- estimate_R(x$new_confirmed,
-#            method='parametric_si',
-#            config = make_config(
-#              list(
-#                mean_si = 3.96,
-#                std_si = 4.75
-#              )
-#            ))
-# 
-# 
-# plot(out$dates[8:nrow(x)],log(out$R$`Mean(R)`))
-# lines(x$day[1:(nrow(x)-7)],x$rt[1:(nrow(x)-7)])
-# out$R %>%
-#   mutate(time = if(wend == TRUE) t_end else ceiling((t_end+t_start)/2) ) %>%
-#   select(time, `Mean(R)`, `Quantile.0.025(R)`, `Quantile.0.975(R)`) %>%
-#   setNames(c('time', paste0(out_name, '.mean'), paste0(out_name, '.025'), paste0(out_name, '.975')))
-
+set.seed(1)
 # transmission rate -------------------------------------------------------
 
 S0=19.54e6
-growth_rates=log(2)/c(2,5,10)
+growth_rates=log(2)/c(2,4,7)
+R0s <- data.table('doubling_time'=factor(round(log(2)/growth_rates)),
+                  'R0'=R0_from_r(growth_rates))
+R0s[,D_HIT:=0.006*(1-1/R0)]
 x <- NULL
 for (r in growth_rates){
-  x <- rbind(x,seird(r,days=400))
+  x <- rbind(x,seird(r,days=300))
 }
 
 x[,doubling_time:=factor(round(log(2)/r))]
 
 
-g1=ggplot(x,aes(date,new_confirmed/S0,by=doubling_time,color=doubling_time))+
-  geom_line(lwd=2)+
-  scale_y_continuous('Cases per capita')+
+
+g1=ggplot(x,aes(date,new_confirmed,by=doubling_time,fill=doubling_time))+
+  geom_bar(stat='identity')+
+  scale_y_continuous('Cases, N(t)')+
   ggtitle('Epidemics over Time')+
   theme_bw()+
   theme(legend.position = c(0.8,0.8))
-g2=ggplot(x,aes(deaths_pc,growth_rate,by=doubling_time,color=doubling_time))+
+
+xx <- x[r==log(2)/4]
+l=30
+par(mfrow=c(1,2))
+plot(xx$date,(xx$rt-min(xx$rt))/(max(xx$rt)-min(xx$rt)),type='l',col='magenta',lwd=2)
+abline(h=-(min(xx$rt))/(max(xx$rt)-min(xx$rt)))
+lines(xx$date,shift(xx$deaths_pc/max(xx$deaths_pc),l,type='lead'),lwd=2)
+plot(shift(xx$deaths_pc,l,type='lead'),xx$rt,type='l',lwd=2)
+abline(v=R0s[doubling_time==4,'D_HIT'])
+abline(h=0)
+
+ggplot(x,aes(shift(deaths_pc,14,type='lead'),rt,by=doubling_time,color=doubling_time))+
   geom_line(lwd=2)+
-  scale_x_continuous('Deaths per capita',trans='log',breaks=10^(-8:1),limits=c(1e-7,4e-3))+
-  scale_y_continuous('Inferred Growth Rate',limits=c(-0.2,1.2*max(x$r)))+
+  scale_x_continuous('Deaths per capita D(t+l)',trans='log',breaks=10^(-8:1),limits=c(1e-7,1e-2))+
+  scale_y_continuous('Inferred Growth Rate r(t)',limits=c(-0.2,0.5))+
   ggtitle('Epidemics over Deaths per-capita')+
-  geom_vline(lty=2,xintercept = 0.0036,lwd=2)+
+  geom_vline(data=R0s,aes(xintercept=D_HIT,color=doubling_time),lwd=2,lty=3)+
+  theme_bw()+
+  theme(legend.position = 'none')+
+  geom_vline(xintercept = 0.0036)+
+  geom_hline(yintercept = 0)
+
+
+g2=ggplot(x,aes(shift(deaths_pc,rDlag,type='lead'),rt,by=doubling_time,color=doubling_time))+
+  geom_line(lwd=2)+
+  scale_x_continuous('Deaths per capita D(t+l)',trans='log',breaks=10^(-8:1),limits=c(1e-7,1e-2))+
+  scale_y_continuous('Inferred Growth Rate r(t)',limits=c(-0.2,0.5))+
+  ggtitle('Epidemics over Deaths per-capita')+
+  geom_vline(data=R0s,aes(xintercept=D_HIT,color=doubling_time),lwd=2,lty=3)+
   theme_bw()+
   theme(legend.position = 'none')
-
-
 
 ggarrange(g1,g2,nrow=2)
 ggsave('figures/epidemics_over_time_and_deaths.png',height=10,width=11,units='in')
 
 
 
-
-ggplot(x[date>as.Date('2020-02-01')],aes(date,shift(rt,16),color=doubling_time))+
+### in these simulations, there was a 7 day lag from infection to case reporting
+ggplot(x[date>as.Date('2020-02-01')],aes(date,rt,color=doubling_time))+
   geom_line(lwd=2)+
-  geom_line(aes(date,growth_rate),lwd=1,lty=1,col='black')+
+  geom_line(aes(date,shift(growth_rate,7,type='lead')),lwd=1,lty=1,col='black')+
   facet_wrap(.~doubling_time,nrow=3)+
-  scale_y_continuous(limits=c(-0.2,0.375))+
-  ggtitle('Suitability of rolling Poisson glm to estimate r(t)')+
+  scale_y_continuous(limits=c(-0.2,0.4))+
+  ggtitle('Suitability of nbss estimate of r(t)')+
   theme_bw()+
   theme(legend.position=c(0.8,0.88))
 ggsave('figures/suitability_of_nbss_estimates_of_rt.png',height=11,width=6,units='in')
