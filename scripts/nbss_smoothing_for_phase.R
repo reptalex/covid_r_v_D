@@ -5,6 +5,7 @@ library(lubridate)
 library(progress)
 library(RcppRoll)
 library(parallel)
+library(data.table)
 source("scripts/utils.R")
 
 set.seed(195893)
@@ -39,16 +40,26 @@ counties <- covid19(country="United States", level=3)
 world <- bind_rows(world, states, counties)
 
 # Process data
-world <- world %>% 
-  group_by(id) %>% 
-  pad() %>% 
-  mutate(new_confirmed = confirmed - lag(confirmed), 
-         new_deaths = deaths - lag(deaths)) %>% 
-  ungroup() %>% 
-  filter(new_confirmed >= 0) %>% 
-  filter(date < Sys.Date()-days(1)) %>% # exclude last day as seems to have  reporting lag 
-  dplyr::select(date, id, deaths, new_deaths, confirmed, new_confirmed, population, contains("administrative")) %>% 
-  filter(!is.na(date))
+world <- as.data.table(world)
+setkey(world,id,date)
+world[,new_confirmed:=c(confirmed[1],diff(confirmed)),by=id]
+world[,new_deaths:=c(deaths[1],diff(deaths)),by=id]
+world <- world[!is.na(date) & new_confirmed>0][date< Sys.Date()-days(1)]
+world <- as.data.frame(world)
+
+world <- dplyr::select(world,date, id, deaths, new_deaths, confirmed, new_confirmed, population, contains("administrative"))
+world <- as.data.frame(world)
+
+# world <- world %>% 
+#   group_by(id) %>% 
+#   pad() %>% 
+#   mutate(new_confirmed = confirmed - lag(confirmed), 
+#          new_deaths = deaths - lag(deaths)) %>% 
+#   ungroup() %>% 
+#   filter(new_confirmed >= 0) %>% 
+#   filter(date < Sys.Date()-days(1)) %>% # exclude last day as seems to have  reporting lag 
+#   dplyr::select(date, id, deaths, new_deaths, confirmed, new_confirmed, population, contains("administrative")) %>% 
+#   filter(!is.na(date))
 
 
 # NBSS growth rate estimation -----------------------------------------------------------

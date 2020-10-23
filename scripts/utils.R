@@ -80,7 +80,7 @@ if (Sys.getenv("RSTUDIO") == "1" && !nzchar(Sys.getenv("RSTUDIO_TERM")) &&
 }
 
 
-nbss <- function(x,remove_outliers=TRUE,filtering=FALSE){
+nbss <- function(x,remove_outliers=TRUE,filtering=FALSE,dispersion=NULL){
   nb_model <- function(x, pars){
     model_nb <- SSModel(x ~ SSMtrend(2, Q=list(0, NA),
                                      P1=diag(c(10, 1)),
@@ -91,16 +91,23 @@ nbss <- function(x,remove_outliers=TRUE,filtering=FALSE){
     fit <- fitSSM(model_nb, c(0), method="L-BFGS-B", control=list(maxit=200))
     return(fit)
   }
-  logLik_nb <- function(x, pars){
-    fit <- nb_model(x, pars)
-    ll <- logLik(fit$model, marginal = TRUE)
-    return(-ll)
+  
+  if (is.null(dispersion)){
+    logLik_nb <- function(x, pars){
+      fit <- nb_model(x, pars)
+      ll <- logLik(fit$model, marginal = TRUE)
+      return(-ll)
+    }
+    if (remove_outliers==TRUE){
+      x <- outlier_detection(x)
+    }
+    res <- optim(c(-1), function(y) logLik_nb(x, y), method="Brent", lower=-2, upper=2) 
+    fit <- nb_model(x, res$par)
+  } else {
+    fit <- nb_model(x,dispersion)
+    res <- NULL
+    res$par[1] <- dispersion
   }
-  if (remove_outliers==TRUE){
-    x <- outlier_detection(x)
-  }
-  res <- optim(c(-1), function(y) logLik_nb(x, y), method="Brent", lower=-2, upper=2)   
-  fit <- nb_model(x, res$par)
   if (filtering==TRUE){
     sm_signal <- KFS(fit$model, filtering="signal",smoothing='none')
     sm_state <- KFS(fit$model, filtering="state",smoothing='none')
@@ -498,3 +505,4 @@ seird <- function(r,cfr=0.006,S0=3.27e8,start_date=as.Date('2020-01-15'),days=20
   
   return(out)
 }
+
