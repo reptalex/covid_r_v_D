@@ -8,6 +8,8 @@ rDlag <- 11
 X <- read.csv('data/nbss_countries.csv') %>% as.data.table
 USA <- read.csv('data/nbss_us_states.csv') %>% as.data.table
 USA[,date:=as.Date(date)]
+X <- X[date<as.Date('2020-10-01')]
+USA <- USA[date<as.Date('2020-10-01')]
 setkey(USA,state,date)
 USA[,deaths_pc:=shift(deaths_pc,rDlag,type='lead'),by=state]
 SWE <- X[country=='Sweden']

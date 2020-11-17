@@ -47,7 +47,7 @@ world[,new_deaths:=c(deaths[1],diff(deaths)),by=id]
 world <- world[!is.na(date) & new_confirmed>0][date< Sys.Date()-days(1)]
 world <- as.data.frame(world)
 
-world <- dplyr::select(world,date, id, deaths, new_deaths, confirmed, new_confirmed, population, contains("administrative"))
+world <- dplyr::select(world,date, tests, id, hosp, deaths, new_deaths, confirmed, new_confirmed, population, contains("administrative"))
 world <- as.data.frame(world)
 
 # world <- world %>% 
@@ -86,10 +86,11 @@ if (compute_dispersions){
   
   # run in parallel with pre-computed dispersions
   fits <- covid19_nbss(world, mc.cores=1, precomputed_dispersions = dispersions)
-  # fits <- covid19_nbss(fits,series='new_deaths', mc.cores=1, precomputed_dispersions = dispersions_deaths)
+  fits <- covid19_nbss(fits,series='new_deaths', mc.cores=1, precomputed_dispersions = dispersions_deaths)
+  
 }
 save(fits, file="data/fits.RData")
-# load("fits.RData")
+# load("data/fits.RData")
 
 
 # Write important chunks into csv ---------------------------------------------

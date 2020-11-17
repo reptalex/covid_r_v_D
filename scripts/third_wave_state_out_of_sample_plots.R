@@ -12,7 +12,7 @@ library(mgcv)
 source('~/COVID/covid_r_v_D/scripts/utils.R')
 
 rDlag <- 11
-focal_states <- c('Montana','North Dakota','South Dakota','Idaho','New Mexico','Indiana')
+focal_states <- c('Montana','Idaho','North Dakota','South Dakota','New Mexico','Indiana','Illinois','Florida','Texas')
 
 fill_dpc <- function(deaths_pc){
   dd <- data.table('y'=deaths_pc)
@@ -110,4 +110,5 @@ col_plot <- function(cntry,cl,X.=X,USA.=USA,swy.=swy,ny.=ny,nj.=nj,death_col=rgb
 }
 
 pps = mapply(col_plot,cntry=focal_states,cl=cls,SIMPLIFY = FALSE)
-ggarrange(plotlist=pps,nrow=2,ncol=3)
+ggarrange(plotlist=pps,nrow=3,ncol=3)
+ggsave('figures/focal_states_11_05.png',height=8,width=11,units='in')
