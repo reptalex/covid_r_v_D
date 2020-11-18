@@ -172,7 +172,7 @@ fit_covid_ssm <- function(dat, series="new_confirmed", precomputed_dispersions=N
                                                      state_names=c("level", "trend"))+
                           SSMseasonal(7),
                         u=rep(exp(pars[1]), nrow(dat)), distribution="negative binomial")
-    fit <- fitSSM(model_nb, c(0), method="L-BFGS-B", control=list(maxit=200, lower=-2, max=5))
+    fit <- fitSSM(model_nb, c(0), method="L-BFGS-B", control=list(maxit=200))
     return(fit)
   }
   logLik_nb <- function(dat, pars){
@@ -301,6 +301,8 @@ covid19_nbss <- function(dat,series="new_confirmed", level='all',mc.cores=1, pre
     stop("only level variables that are supported are all, country, and state")
   }
   tmp <- dat %>% 
+    mutate(new_deaths = ifelse(new_deaths < 0, 0, new_deaths), 
+           new_confirmed = ifelse(new_confirmed < 0, 0, new_confirmed)) %>% 
     as.data.frame() %>% 
     split(.$id)
   if (mc.cores == 1){
@@ -346,11 +348,14 @@ custom_processors <- function(dat){
 
 
 outlier_detection <- function(x){
+  if (sum(x, na.rm=TRUE) < 100 &  sum(x==0, na.rm=TRUE) > length(x)*0.5){
+    return(x)
+  }
   tryCatch({
     res <- tso(ts(x),
-               type="TC", delta=0.1, maxit.iloop = 100, maxit.oloop = 10, 
+               type="TC", delta=0.1, maxit.iloop = 100, maxit.oloop = 10,  
                #tsmethod = "auto.arima", args.tsmethod = list(allowdrift = FALSE, ic = "bic", stationary=TRUE),
-               tsmethod="arima", args.tsmethod=list(order=c(1,1,2), method="ML", transform.pars=TRUE),
+               tsmethod="arima", args.tsmethod=list(order=c(1,1,2), method="ML", transform.pars=TRUE, optim.method="BFGS"),
                cval=4)
   }, error = function(err){
     res <- tso(ts(x),
