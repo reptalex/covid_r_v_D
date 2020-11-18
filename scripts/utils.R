@@ -11,6 +11,11 @@ library(lubridate)
 library(EpiEstim)
 library(mgcv)
 
+dfs <- function(x){
+  x <- c(x[1],diff(x))
+  x[x<0] <- NA
+  return(x)
+}
 
 get_cori <- function(df.in, 
                      icol_name, 
