@@ -161,8 +161,9 @@ nbss <- function(x,remove_outliers=TRUE,filtering=FALSE,dispersion=NULL){
 #   pX_Y is quantile X for the quantitly Y
 #   mean_ is the mean of the quantity Y
 #   z_score_growth_rate = growth_rate/sd_growth_rate
-fit_covid_ssm <- function(dat, series="new_confirmed", precomputed_dispersions=NULL,
+fit_covid_ssm <- function(d, series="new_confirmed", precomputed_dispersions=NULL,
                           return_fit=FALSE,maxiter=200,filtering=FALSE){
+  dat <- d
   
   # Helper functions
   nb_model <- function(dat, pars){
@@ -184,36 +185,39 @@ fit_covid_ssm <- function(dat, series="new_confirmed", precomputed_dispersions=N
   # Remove preceding zeros
   dat <- dat %>% 
     arrange(date)
-  dat$cs = cumsum(dat[,series])
+  dat$cs = cumsum(ifelse(is.na(dat[,series]), 0, dat[,series]))
   dat <- dat %>% filter(cs > 0)
-  if (nrow(dat) < 10) return(NULL)
+  if (nrow(dat) < 10) return(cbind(d, error="not enough non-zero"))
   
   # outlier detection for early outbreak
   dat <- custom_processors(dat)
-  if (sum(dat[,series]!=0) < 10) return(NULL)
+  if (sum(dat[,series]!=0, na.rm=TRUE) < 10) return(cbind(d, error="not enough non-zero"))
   tryCatch({
-    outlier_filtered_ts <- getElement(dat,series) %>% outlier_detection
+    tmp <-getElement(dat,series)
+    tmp <- ifelse(is.na(tmp), 0, tmp)
+    outlier_filtered_ts <- tmp %>% outlier_detection
+    outlier_filtered_ts[is.na(getElement(dat, series))] <- NA
     dat <- mutate(dat, series=outlier_filtered_ts)    
   },  error = function(err){
-    return(NULL)
+    return(cbind(d, error="outlier detection errored"))
   })
   
-  if (length(dat[,series][!is.na(dat[,series])]) < 10) return(NULL)
+  if (length(dat[,series][!is.na(dat[,series])]) < 10) return(cbind(d, error="too many NA"))
   
   
   if (!is.null(precomputed_dispersions)){
     res <- list()
     res$par <- dplyr::filter(precomputed_dispersions, id==unique(dat$id))$dispersion
-    if (length(res$par)==0) return(NULL) # no precomputed dispersion (previously was not able to fit likely)
+    if (length(res$par)==0) return(cbind(d, error="could not find precomputed dispersions")) # no precomputed dispersion (previously was not able to fit likely)
   } else {
-    res <- optim(c(-1), function(x) logLik_nb(dat, x), method="Brent", lower=-2, upper=2)    
-    if (res$convergence != 0) return(NULL)
+    res <- optim(c(-1), function(x) logLik_nb(dat, x), method="Brent", lower=-2, upper=3)    
+    if (res$convergence != 0) return(cbind(d, error="dispersion optimization failed"))
   }
   
   # now fit the model with the optimized dispersion parameters
   fit <- nb_model(dat, res$par)
   if(return_fit) return(fit)
-  if (fit$optim.out$convergence != 0) return(NULL)
+  if (fit$optim.out$convergence != 0) return(cbind(d, error="model optimiztion (not dispersion) failed"))
   if (filtering==FALSE){
     sm_signal <- KFS(fit$model, smoothing="signal")
     sm_state <- KFS(fit$model, smoothing="state")
@@ -284,9 +288,9 @@ fit_covid_ssm <- function(dat, series="new_confirmed", precomputed_dispersions=N
   }
   
   if (any(grepl('administrative_area',colnames(dat)))){
-    if (any(out$p97.5_signal > 1e6)) return(NULL)
+    if (any(out$p97.5_signal > 1e6)) return(cbind(d, error="97.5_signal > 1e6"))
   }
-  if (quantile(abs(out$z_score_growth_rate), probs=0.75) < 0.4) return(NULL)
+  if (quantile(abs(out$z_score_growth_rate), probs=0.75) < 0.4) return(cbind(d, error="quantile(abs(out$z_score_growth_rate), probs=0.75) < 0.4"))
   return(cbind(dat, out))
 }
 covid19_nbss <- function(dat,series="new_confirmed", level='all',mc.cores=1, precomputed_dispersions=NULL,
@@ -311,6 +315,7 @@ covid19_nbss <- function(dat,series="new_confirmed", level='all',mc.cores=1, pre
     for (i in 1:length(tmp)){
       pb$tick()
       fits[[i]] <- fit_covid_ssm(tmp[[i]], series, precomputed_dispersions,filtering=filtering)
+      #if (is.null(fits[[i]])) stop("foo")
     }  
   } else {
     cl <- parallel::makeCluster(mc.cores)

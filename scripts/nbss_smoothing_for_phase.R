@@ -42,32 +42,35 @@ world <- bind_rows(world, states, counties)
 # Process data
 world <- as.data.table(world)
 setkey(world,id,date)
-world[,new_confirmed:=c(confirmed[1],diff(confirmed)),by=id]
-world[,new_deaths:=c(deaths[1],diff(deaths)),by=id]
-world <- world[!is.na(date) & new_confirmed>0][date< Sys.Date()-days(1)]
+world[,new_confirmed:=(confirmed - lag(confirmed)),by=id]
+world[,new_deaths:=(deaths - lag(deaths)),by=id]
+world <- world [!is.na(new_deaths) & !is.na(new_confirmed)]
+world$new_confirmed <- ifelse(world$new_confirmed < 0, NA, world$new_confirmed)
+world$new_deaths <- ifelse(world$new_deaths < 0, NA, world$new_deaths)
+world <- world[!is.na(date)][date< Sys.Date()-days(1)]
 world <- as.data.frame(world)
 
 world <- dplyr::select(world,date, tests, id, hosp, deaths, new_deaths, confirmed, new_confirmed, population, contains("administrative"))
 world <- as.data.frame(world)
 
-# world <- world %>% 
-#   group_by(id) %>% 
-#   pad() %>% 
-#   mutate(new_confirmed = confirmed - lag(confirmed), 
-#          new_deaths = deaths - lag(deaths)) %>% 
-#   ungroup() %>% 
-#   filter(new_confirmed >= 0) %>% 
-#   filter(date < Sys.Date()-days(1)) %>% # exclude last day as seems to have  reporting lag 
-#   dplyr::select(date, id, deaths, new_deaths, confirmed, new_confirmed, population, contains("administrative")) %>% 
-#   filter(!is.na(date))
-
 
 # NBSS growth rate estimation -----------------------------------------------------------
+
+# debugging
+# world <- world %>% 
+#   filter(administrative_area_level_1=="United States", administrative_area_level==2)
+####
 
 ## IF DISPERSIONS NEED TO BE CALCULATED
 if (compute_dispersions){
   fits <- covid19_nbss(world, series="new_confirmed", mc.cores=1)
   fits <- covid19_nbss(fits, series="new_deaths", mc.cores=1)
+  
+  # Consolidate error codes
+  fits <- fits %>% 
+    mutate(error = paste(error, `error...30`, `error...31`, sep=" / ")) %>% 
+    select(-`error...30`, -`error...31`) %>% 
+    mutate(error = ifelse(error == "NA / NA / NA", NA, error))
 
   save(fits, file="fits.RData")
   fits %>%
