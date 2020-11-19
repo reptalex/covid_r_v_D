@@ -11,6 +11,11 @@ library(lubridate)
 library(EpiEstim)
 library(mgcv)
 
+dfs <- function(x){
+  x <- c(x[1],diff(x))
+  x[x<0] <- NA
+  return(x)
+}
 
 get_cori <- function(df.in, 
                      icol_name, 
@@ -92,19 +97,20 @@ nbss <- function(x,remove_outliers=TRUE,filtering=FALSE,dispersion=NULL){
     return(fit)
   }
   
+  if (remove_outliers==TRUE){
+    x <- outlier_detection(x)
+  }
   if (is.null(dispersion)){
     logLik_nb <- function(x, pars){
       fit <- nb_model(x, pars)
       ll <- logLik(fit$model, marginal = TRUE)
       return(-ll)
     }
-    if (remove_outliers==TRUE){
-      x <- outlier_detection(x)
-    }
+    
     res <- optim(c(-1), function(y) logLik_nb(x, y), method="Brent", lower=-2, upper=2) 
     fit <- nb_model(x, res$par)
   } else {
-    fit <- nb_model(x,dispersion)
+    fit <- tryCatch(nb_model(x,dispersion),error=function(e) NULL)
     res <- NULL
     res$par[1] <- dispersion
   }
@@ -293,7 +299,10 @@ fit_covid_ssm <- function(d, series="new_confirmed", precomputed_dispersions=NUL
   if (quantile(abs(out$z_score_growth_rate), probs=0.75) < 0.4) return(cbind(d, error="quantile(abs(out$z_score_growth_rate), probs=0.75) < 0.4"))
   return(cbind(dat, out))
 }
-covid19_nbss <- function(dat,series="new_confirmed", level='all',mc.cores=1, precomputed_dispersions=NULL,
+
+
+covid19_nbss <- function(dat,series="new_confirmed", level='all',
+                         mc.cores=1, precomputed_dispersions=NULL,
                          filtering=FALSE){
   if (level=="country"){
     tmp <- filter(dat, administrative_area_level==1)
