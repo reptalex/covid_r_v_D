@@ -53,13 +53,28 @@ world <- as.data.frame(world)
 world <- dplyr::select(world,date, tests, id, hosp, deaths, new_deaths, confirmed, new_confirmed, population, contains("administrative"))
 world <- as.data.frame(world)
 
+# Deal with weekends
+world <- world %>% 
+  mutate(weekend = format(date, "%u") %in% c(6, 7))
+
+# States with zero weekends
+swz <- c("Michigan", "Connecticut")
+
+
 
 # NBSS growth rate estimation -----------------------------------------------------------
 
-# debugging
-# world <- world %>% 
-#   filter(administrative_area_level_1=="United States", administrative_area_level==2)
-####
+# # debugging
+# world <- world %>%
+#   filter(administrative_area_level_1=="United States", administrative_area_level==2) %>% 
+#   filter(administrative_area_level_2 %in% c("Michigan", "Connecticut", "New York"))
+# 
+# world %>% 
+#   ggplot(aes(x=date, y=new_deaths))+
+#   geom_line() + 
+#   facet_grid(administrative_area_level_2~., scales="free")
+# 
+# ####
 
 ## IF DISPERSIONS NEED TO BE CALCULATED
 if (compute_dispersions){
@@ -94,6 +109,14 @@ if (compute_dispersions){
 }
 save(fits, file="data/fits.RData")
 # load("data/fits.RData")
+
+# # debugging
+# fits %>% 
+#   ggplot(aes(x=date, y=exp(mean_position))) +
+#   geom_line() +
+#   geom_point(aes(y=new_confirmed)) +
+#   facet_grid(administrative_area_level_2~.,scales="free")
+# # ###
 
 
 # Write important chunks into csv ---------------------------------------------

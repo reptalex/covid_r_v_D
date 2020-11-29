@@ -195,12 +195,24 @@ fit_covid_ssm <- function(d, series="new_confirmed", precomputed_dispersions=NUL
   dat <- dat %>% filter(cs > 0)
   if (nrow(dat) < 10) return(cbind(d, error="not enough non-zero"))
   
+  # Remove weekend zeros
+  dat[[series]] <- ifelse((dat[[series]] == 0) & (format(dat$date, "%u") %in% c(6,7)), 
+                          NA, dat[[series]])
+  # Remove holiday zeros
+  dat[[series]] <- ifelse((dat[[series]] == 0) & (dat$date %in% c(ymd("2020-11-26"), # Thanksgiving
+                                                                  ymd("2020-12-25"), 
+                                                                  ymd("2020-12-31"), 
+                                                                  ymd("2021-01-01"))),
+                          NA, dat[[series]])
+  
+  
   # outlier detection for early outbreak
   dat <- custom_processors(dat)
   if (sum(dat[,series]!=0, na.rm=TRUE) < 10) return(cbind(d, error="not enough non-zero"))
   tryCatch({
     tmp <-getElement(dat,series)
-    tmp <- ifelse(is.na(tmp), 0, tmp)
+    #tmp <- ifelse(is.na(tmp), 0, tmp)
+    tmp <- na.approx(tmp)
     outlier_filtered_ts <- tmp %>% outlier_detection
     outlier_filtered_ts[is.na(getElement(dat, series))] <- NA
     dat <- mutate(dat, series=outlier_filtered_ts)    
@@ -356,6 +368,7 @@ custom_processors <- function(dat){
           filter(date > ymd("2020-02-28") )
       }
     }
+    # Insert new US custom processors here
   }
   return(dat)
 }
